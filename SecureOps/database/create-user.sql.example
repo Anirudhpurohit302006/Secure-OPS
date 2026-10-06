@@ -1,0 +1,4 @@
+-- Run as the PostgreSQL superuser (postgres) - scripts\setup-database.ps1 does this for you.
+-- Replace the password with a strong one and use the same value for DB_PASSWORD in config\secureops.env.
+CREATE ROLE secureops LOGIN PASSWORD 'CHANGE_ME_STRONG_PASSWORD';
+CREATE DATABASE secureops OWNER secureops ENCODING 'UTF8';

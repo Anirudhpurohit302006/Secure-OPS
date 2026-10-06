@@ -1,0 +1,493 @@
+SECUREOPS V1
+SETUP, STARTUP, RESTART, TESTING & TROUBLESHOOTING GUIDE
+==========================================================
+
+This is the practical guide for running SecureOps on Windows.
+
+ARCHITECTURE
+Windows Host -> React/Vite frontend : http://localhost:5173
+              -> Java/Spring Boot backend : http://localhost:8080
+              -> PostgreSQL 16 : localhost:5432
+              -> SSH -> RHEL-01 : 192.168.159.129
+              -> SSH -> RHEL-02 : 192.168.159.128
+
+RHEL-01: hostname rhel01, IP 192.168.159.129, SSH user anirudhpurohit
+RHEL-02: hostname rhel02, IP 192.168.159.128, SSH user anirudh
+
+==========================================================
+1. PREREQUISITES
+==========================================================
+Java 25 LTS, Maven 3.10.x, Node.js 20+, PostgreSQL 16.x, Git, VS Code,
+VMware Workstation and a modern browser.
+
+Checks:
+    java -version
+    mvn -v
+    node -v
+    npm -v
+    git --version
+    psql --version
+
+PostgreSQL service:
+    Get-Service postgresql*
+    Start-Service postgresql-x64-16
+
+PostgreSQL check:
+    psql -U postgres -h localhost -c "SELECT version();"
+
+==========================================================
+2. PROJECT LOCATION
+==========================================================
+Example current location:
+    D:\Desktop\Secureops\SecureOps-v1-postgresql\SecureOps
+
+    cd "D:\Desktop\Secureops\SecureOps-v1-postgresql\SecureOps"
+
+==========================================================
+3. CONFIGURATION
+==========================================================
+Create the local environment file:
+    copy config\secureops.example.env config\secureops.env
+    notepad config\secureops.env
+
+Important values:
+    DB_HOST=localhost
+    DB_PORT=5432
+    DB_NAME=secureops
+    DB_USER=secureops
+    DB_PASSWORD=<local PostgreSQL application password>
+    SSH_PRIVATE_KEY_PATH=C:/Users/ANIRUDH/.ssh/secureops_ed25519
+    SSH_PASSWORD=
+    SSH_KNOWN_HOSTS_PATH=C:/Users/ANIRUDH/.ssh/known_hosts
+    SSH_CONNECT_TIMEOUT_MS=8000
+    SSH_COMMAND_TIMEOUT_MS=20000
+    ADMIN_USERNAME=admin
+    ADMIN_PASSWORD_HASH=<BCrypt hash>
+    COLLECTION_INTERVAL_MINUTES=30
+    MONITORED_SERVICES=sshd,firewalld,httpd
+
+NEVER commit config\secureops.env.
+
+==========================================================
+4. ADMIN PASSWORD / HASH
+==========================================================
+Generate/change the BCrypt hash:
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+    .\scripts\hash-password.ps1
+
+Put the generated hash in config\secureops.env as:
+    ADMIN_PASSWORD_HASH=<hash>
+
+Restart the backend after changing it.
+The local development username/password is in SecureOps_LOCAL-CREDENTIALS.txt.
+DO NOT commit that file.
+
+==========================================================
+5. DEBUG ENVIRONMENT LOADING
+==========================================================
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+    . .\scripts\load-env.ps1
+    Write-Host "USERNAME = <$env:ADMIN_USERNAME>"
+    Write-Host "HASH LENGTH = $($env:ADMIN_PASSWORD_HASH.Length)"
+    Write-Host "HASH PREFIX = $($env:ADMIN_PASSWORD_HASH.Substring(0,7))"
+
+Expected:
+    USERNAME = <admin>
+    HASH LENGTH = 60
+    HASH PREFIX = $2a$10$
+
+==========================================================
+6. POSTGRESQL DATABASE
+==========================================================
+Run:
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+    .\scripts\setup-database.ps1
+
+It creates/updates the secureops role, creates the secureops database,
+applies database\schema.sql and database\seed.sql.
+
+Useful checks:
+    psql -U secureops -h localhost -d secureops -c "\dt"
+    psql -U secureops -h localhost -d secureops -c "SELECT machine_id, machine_name, ip_address, ssh_username, status, last_seen FROM machines ORDER BY machine_id;"
+    psql -U secureops -h localhost -d secureops -c "SELECT machine_id, timestamp, cpu_usage, memory_usage, disk_usage FROM system_metrics ORDER BY timestamp DESC LIMIT 10;"
+
+==========================================================
+7. WINDOWS SSH KEY
+==========================================================
+Generate:
+    ssh-keygen -t ed25519 -f $env:USERPROFILE\.ssh\secureops_ed25519
+
+Private key:
+    C:\Users\ANIRUDH\.ssh\secureops_ed25519
+
+NEVER commit the private key.
+
+==========================================================
+8. RHEL-01 SSH KEY SETUP
+==========================================================
+RHEL-01 = 192.168.159.129, user = anirudhpurohit
+
+On RHEL-01 as root/admin:
+    mkdir -p /home/anirudhpurohit/.ssh
+    echo 'YOUR_PUBLIC_KEY' >> /home/anirudhpurohit/.ssh/authorized_keys
+    chown -R anirudhpurohit:anirudhpurohit /home/anirudhpurohit/.ssh
+    chmod 700 /home/anirudhpurohit/.ssh
+    chmod 600 /home/anirudhpurohit/.ssh/authorized_keys
+    restorecon -Rv /home/anirudhpurohit/.ssh
+
+==========================================================
+9. RHEL-02 SSH KEY SETUP
+==========================================================
+RHEL-02 = 192.168.159.128, user = anirudh
+
+On RHEL-02 as root/admin:
+    mkdir -p /home/anirudh/.ssh
+    echo 'YOUR_PUBLIC_KEY' > /home/anirudh/.ssh/authorized_keys
+    chown -R anirudh:anirudh /home/anirudh/.ssh
+    chmod 700 /home/anirudh/.ssh
+    chmod 600 /home/anirudh/.ssh/authorized_keys
+    restorecon -Rv /home/anirudh/.ssh
+
+==========================================================
+10. STRICT SSH TESTS
+==========================================================
+RHEL-01:
+    ssh -o PreferredAuthentications=publickey -o PasswordAuthentication=no -i "C:\Users\ANIRUDH\.ssh\secureops_ed25519" anirudhpurohit@192.168.159.129
+
+RHEL-02:
+    ssh -o PreferredAuthentications=publickey -o PasswordAuthentication=no -i "C:\Users\ANIRUDH\.ssh\secureops_ed25519" anirudh@192.168.159.128
+
+Port 22 checks:
+    Test-NetConnection 192.168.159.129 -Port 22
+    Test-NetConnection 192.168.159.128 -Port 22
+
+Expected:
+    TcpTestSucceeded : True
+
+If these work, do NOT change the RHEL firewall just for an SSH application problem.
+
+==========================================================
+11. RHEL PREPARATION
+==========================================================
+Copy/run scripts\rhel-setup.sh on each VM:
+    sudo ./rhel-setup.sh <ssh-username>
+
+Optional HTTPD:
+    sudo dnf install httpd
+    sudo systemctl enable --now httpd
+
+Checks:
+    systemctl is-active sshd
+    systemctl is-active firewalld
+    systemctl is-active httpd
+    getenforce
+    ss -tuln
+
+==========================================================
+12. START BACKEND
+==========================================================
+Terminal 1:
+    cd "D:\Desktop\Secureops\SecureOps-v1-postgresql\SecureOps"
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+    .\scripts\run-backend.ps1
+
+Backend:
+    http://localhost:8080
+
+IMPORTANT: only one backend instance should run on port 8080.
+
+Check port 8080 if needed:
+    Get-NetTCPConnection -LocalPort 8080 -ErrorAction SilentlyContinue
+
+==========================================================
+13. START FRONTEND
+==========================================================
+Terminal 2:
+    cd "D:\Desktop\Secureops\SecureOps-v1-postgresql\SecureOps"
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+    .\scripts\run-frontend.ps1
+
+Frontend:
+    http://localhost:5173
+
+Open that URL in the browser.
+
+==========================================================
+14. DAILY STARTUP - SHORT VERSION
+==========================================================
+Terminal 1:
+    cd "D:\Desktop\Secureops\SecureOps-v1-postgresql\SecureOps"
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+    .\scripts\run-backend.ps1
+
+Terminal 2:
+    cd "D:\Desktop\Secureops\SecureOps-v1-postgresql\SecureOps"
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+    .\scripts\run-frontend.ps1
+
+Browser:
+    http://localhost:5173
+
+==========================================================
+15. DIRECT LOGIN API TEST
+==========================================================
+PowerShell:
+    Invoke-RestMethod -Uri "http://localhost:8080/api/auth/login" -Method POST -ContentType "application/json" -Body '{"username":"admin","password":"<YOUR_PASSWORD>"}' | ConvertTo-Json -Depth 10
+
+Successful result:
+    {
+        "username": "admin"
+    }
+
+401 means the backend rejected the credentials.
+429 means the login throttle has been triggered.
+
+==========================================================
+16. LOGIN TROUBLESHOOTING
+==========================================================
+If the browser says Invalid username or password:
+
+1. Test the API directly using the command above.
+2. Check ADMIN_USERNAME and ADMIN_PASSWORD_HASH.
+3. Check the browser DevTools -> Network -> login -> Payload.
+4. Username must be exactly:
+       admin
+   with NO trailing space.
+5. Make sure only one backend is running.
+6. Restart the backend after changing configuration.
+
+A previous test revealed a trailing space in the browser payload:
+    "username": "admin "
+That is different from:
+    "username": "admin"
+and correctly causes a 401.
+
+==========================================================
+17. LOGIN THROTTLE / 429
+==========================================================
+If Invoke-RestMethod returns 429 Too Many Requests:
+    - stop repeated login attempts
+    - wait for the throttle window, OR
+    - restart the development backend
+
+Then test the API once.
+
+==========================================================
+18. BACKEND RESTART
+==========================================================
+In backend terminal:
+    Ctrl+C
+Then:
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+    .\scripts\run-backend.ps1
+
+==========================================================
+19. FRONTEND RESTART
+==========================================================
+In frontend terminal:
+    Ctrl+C
+Then:
+    .\scripts\run-frontend.ps1
+
+==========================================================
+20. FULL RESTART TEST
+==========================================================
+1. Stop frontend with Ctrl+C.
+2. Stop backend with Ctrl+C.
+3. Check PostgreSQL:
+       Get-Service postgresql*
+4. Start backend.
+5. Start frontend in another terminal.
+6. Open http://localhost:5173
+7. Logout.
+8. Login again.
+9. Check Home, Systems, Security, Analytics and Settings.
+
+==========================================================
+21. OFFLINE MACHINE TEST
+==========================================================
+1. Power off one RHEL VM.
+2. Wait for collection or use Collect now.
+3. Verify it becomes OFFLINE.
+4. Verify historical data remains.
+5. Verify last successful collection time remains.
+6. Power the VM back on.
+7. Verify it returns ONLINE after successful collection.
+
+This behavior has been tested successfully.
+
+==========================================================
+22. TEST CONNECTION
+==========================================================
+In Settings:
+    RHEL-01 -> Test Connection
+    RHEL-02 -> Test Connection
+
+Expected:
+    Connected to rhel01
+    Connected to rhel02
+
+If it fails, verify IP, SSH user, key path, known_hosts and the strict SSH tests.
+
+==========================================================
+23. APPROVED RHEL DATA COMMANDS
+==========================================================
+Identity:
+    hostname
+    cat /etc/os-release
+    uname -r
+    cat /etc/machine-id
+    hostname -I
+    uptime
+
+CPU:
+    /proc/stat
+
+Memory:
+    /proc/meminfo
+
+Disk:
+    df -B1
+
+Network interfaces:
+    ip -brief address
+
+Network traffic:
+    /proc/net/dev
+
+Listening ports:
+    ss -tuln
+
+Services:
+    systemctl is-active sshd
+    systemctl is-active firewalld
+    systemctl is-active httpd
+
+Firewall:
+    firewall-cmd --state
+
+SELinux:
+    getenforce
+
+SSH config:
+    ss -tln
+    /etc/ssh/sshd_config
+
+Authentication:
+    /var/log/secure
+
+Events:
+    journalctl
+    who -b
+
+Service failures:
+    systemctl
+    journalctl
+
+SecureOps only executes predefined approved commands; it is not a general remote terminal.
+
+==========================================================
+24. COLLECTION SCHEDULER
+==========================================================
+Normal interval: 30 minutes
+Maximum tolerance: 45 minutes
+
+Targets are collected sequentially:
+    RHEL-01 -> collect -> disconnect
+    RHEL-02 -> collect -> disconnect
+
+SSH connections are temporary. Historical records are appended.
+
+==========================================================
+25. DATABASE CHECKS AFTER COLLECTION
+==========================================================
+Machines:
+    psql -U secureops -h localhost -d secureops -c "SELECT machine_id, machine_name, ip_address, ssh_username, status, last_seen FROM machines ORDER BY machine_id;"
+
+Metrics:
+    psql -U secureops -h localhost -d secureops -c "SELECT machine_id, timestamp, cpu_usage, memory_usage, disk_usage FROM system_metrics ORDER BY timestamp DESC LIMIT 20;"
+
+Services:
+    psql -U secureops -h localhost -d secureops -c "SELECT machine_id, service_name, status, timestamp FROM service_status ORDER BY timestamp DESC LIMIT 20;"
+
+Auth events:
+    psql -U secureops -h localhost -d secureops -c "SELECT machine_id, username, source_ip, event_type, timestamp FROM auth_events ORDER BY timestamp DESC LIMIT 20;"
+
+==========================================================
+26. TESTS
+==========================================================
+Backend:
+    cd backend
+    mvn clean test
+    cd ..
+
+Frontend:
+    cd frontend
+    npm test
+    npm run build
+    cd ..
+
+==========================================================
+27. GITHUB / GIT SAFETY
+==========================================================
+Before pushing:
+    git status
+    git ls-files
+
+NEVER commit:
+    config\secureops.env
+    private SSH keys
+    database passwords
+    real password hashes
+    LOCAL-CREDENTIALS.txt
+    other secrets
+
+Add this to .gitignore if using the local credentials file:
+    LOCAL-CREDENTIALS.txt
+
+Then:
+    git status
+    git add .
+    git status
+    git commit -m "SecureOps V1 - PostgreSQL monitoring platform"
+    git push
+
+If GitHub detects a secret, STOP and rotate/remove the secret rather than bypassing protection.
+
+==========================================================
+28. FUNCTIONAL TEST CHECKLIST
+==========================================================
+[ ] PostgreSQL running
+[ ] Backend starts
+[ ] Frontend starts
+[ ] Login works
+[ ] Logout works
+[ ] Relogin works
+[ ] Home loads
+[ ] Both systems visible
+[ ] RHEL-01 online
+[ ] RHEL-02 online
+[ ] CPU/RAM/Disk data visible
+[ ] Network data visible
+[ ] Listening ports visible
+[ ] SSH/firewalld/SELinux status visible
+[ ] Security findings visible
+[ ] Authentication activity visible
+[ ] Analytics visible
+[ ] Target/time filters work
+[ ] Settings works
+[ ] Test Connection works
+[ ] Collect now works
+[ ] Offline detection works
+[ ] Offline recovery works
+[ ] Backend restart works
+[ ] Frontend restart works
+[ ] Full restart works
+[ ] Database history survives restart
+[ ] Backend tests pass
+[ ] Frontend tests pass
+[ ] Production build passes
+
+==========================================================
+END
+==========================================================

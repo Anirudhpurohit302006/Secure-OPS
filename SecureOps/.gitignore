@@ -1,0 +1,32 @@
+# Secrets
+.env
+*.env
+!*.example.env
+config/application.properties
+config/application-local.properties
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# Backend
+backend/target/
+*.class
+*.log
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Python (analytics reference)
+.venv/
+venv/
+__pycache__/
+
+# IDE / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.iml
+.DS_Store
+Thumbs.db

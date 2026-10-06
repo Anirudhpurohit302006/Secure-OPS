@@ -1,0 +1,36 @@
+# SecureOps backend configuration. Contains NO secrets: every secret comes from environment variables.
+# Optional local overrides (git-ignored): config/application-local.properties
+spring.config.import=optional:file:../config/application-local.properties
+spring.application.name=secureops
+
+server.port=${SERVER_PORT:8080}
+server.error.include-stacktrace=never
+server.error.include-message=never
+server.servlet.session.timeout=8h
+server.servlet.session.cookie.http-only=true
+server.servlet.session.cookie.same-site=lax
+server.servlet.session.cookie.name=SECUREOPS_SESSION
+
+spring.datasource.url=jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:secureops}
+spring.datasource.username=${DB_USER:secureops}
+spring.datasource.password=${DB_PASSWORD:}
+spring.jackson.default-property-inclusion=always
+
+secureops.ssh.private-key-path=${SSH_PRIVATE_KEY_PATH:}
+secureops.ssh.private-key-passphrase=${SSH_PRIVATE_KEY_PASSPHRASE:}
+secureops.ssh.password=${SSH_PASSWORD:}
+secureops.ssh.known-hosts-path=${SSH_KNOWN_HOSTS_PATH:}
+secureops.ssh.connect-timeout-ms=${SSH_CONNECT_TIMEOUT_MS:8000}
+secureops.ssh.command-timeout-ms=${SSH_COMMAND_TIMEOUT_MS:20000}
+
+secureops.auth.username=${ADMIN_USERNAME:admin}
+secureops.auth.password-hash=${ADMIN_PASSWORD_HASH:}
+
+secureops.collection.enabled=${COLLECTION_ENABLED:true}
+secureops.collection.interval-minutes=${COLLECTION_INTERVAL_MINUTES:30}
+secureops.collection.initial-delay-seconds=${COLLECTION_INITIAL_DELAY_SECONDS:20}
+
+# sshd, firewalld and httpd are always monitored; add extra unit names here (comma separated).
+secureops.monitored-services=${MONITORED_SERVICES:sshd,firewalld,httpd}
+
+secureops.cors.allowed-origins=${CORS_ALLOWED_ORIGINS:http://localhost:5173}
